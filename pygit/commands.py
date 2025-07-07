@@ -3,19 +3,46 @@ import sys
 import collections
 from datetime import datetime
 import json
+import fnmatch
+
 from .repository import find_pygit_dir, init as repo_init
 from .objects import read_object, hash_object, get_commit_tree, get_tree_contents
 from .index import read_index, write_index
-from .refs import get_head_ref, get_head_commit, update_head
+from .refs import get_head_ref, get_head_commit, update_head, get_branch_commit
+from .diff import compare_files, compare_trees
+from .utils import get_commit_history
+
+def read_gitignore():
+    pygit_dir = find_pygit_dir()
+    if not pygit_dir: return set()
+    repo_root = os.path.dirname(pygit_dir)
+    gitignore_path = os.path.join(repo_root, '.gitignore')
+    if not os.path.exists(gitignore_path):
+        return set()
+    with open(gitignore_path, 'r') as f:
+        return {line.strip() for line in f if line.strip() and not line.startswith('#')}
+
+
+def is_ignored(filepath, gitignore_patterns):
+    for pattern in gitignore_patterns:
+        if fnmatch.fnmatch(filepath, pattern):
+            return True
+    return False
 
 def init():
     repo_init()
 
 
 def add(filepath):
+    gitignore_patterns = read_gitignore()
+    if is_ignored(filepath, gitignore_patterns):
+        print(f"Ignoring '{filepath}' due to .gitignore")
+        return
+
     if not os.path.exists(filepath):
         print(f"Error: file not found: {filepath}", file=sys.stderr)
         return
+
     with open(filepath, 'rb') as f:
         content = f.read()
 
@@ -42,7 +69,6 @@ def commit(*args):
 
     tree_data = json.dumps(index, sort_keys=True).encode()
     tree_sha1 = hash_object(tree_data, 'tree')
-
     parent_sha1 = get_head_commit()
 
     commit_data = (
@@ -64,68 +90,60 @@ def commit(*args):
     with open(ref_full_path, 'w') as f:
         f.write(commit_sha1)
 
-    write_index({})  # Clear the index
+    write_index({})
     print(f"Committed, commit hash: {commit_sha1}")
 
 
 def log():
-    commit_sha1 = get_head_commit()
-    if not commit_sha1:
-        print("No commits yet.")
-        return
-
-    while commit_sha1:
+    for commit_sha1, commit_content in get_commit_history(get_head_commit()):
         print(f"commit {commit_sha1}")
 
-        _, content = read_object(commit_sha1)
-        commit_content = content.decode()
-
-        lines = commit_content.split('\n')
-        parent_line = next((line for line in lines if line.startswith('parent ')), None)
+        lines = commit_content.decode().split('\n')
         author_line = next(line for line in lines if line.startswith('author '))
         print(f"Author: {author_line.split(' ', 1)[1]}")
 
-        message_start_index = commit_content.find('\n\n') + 2
-        print(f"\n    {commit_content[message_start_index:].strip()}\n")
-
-        if parent_line and parent_line.split(' ')[1] != 'None':
-            commit_sha1 = parent_line.split(' ')[1]
-        else:
-            commit_sha1 = None
+        message_start_index = commit_content.find(b'\n\n') + 2
+        print(f"\n    {commit_content[message_start_index:].decode().strip()}\n")
 
 
 def status():
+    gitignore_patterns = read_gitignore()
     head_commit = get_head_commit()
     head_tree_sha = get_commit_tree(head_commit)
     head_tree = get_tree_contents(head_tree_sha)
     index = read_index()
 
-    staged_changes = {
-        'added': [f for f in index if f not in head_tree],
-        'modified': [f for f in index if f in head_tree and index[f] != head_tree[f]],
-        'deleted': [f for f in head_tree if f not in index]
-    }
+    added, deleted, modified = compare_trees(head_tree, index)
     print("Changes to be committed:")
-    if not any(staged_changes.values()): print("  (no changes staged)")
-    for f in staged_changes['added']: print(f"  new file:   {f}")
-    for f in staged_changes['modified']: print(f"  modified:   {f}")
-    for f in staged_changes['deleted']: print(f"  deleted:    {f}")
+    if not any([added, deleted, modified]): print("  (no changes staged)")
+    for f in added: print(f"  new file:   {f}")
+    for f in modified: print(f"  modified:   {f}")
+    for f in deleted: print(f"  deleted:    {f}")
     print()
 
     unstaged_changes = collections.defaultdict(list)
     untracked_files = []
+
+    repo_root = os.path.dirname(find_pygit_dir())
     all_tracked_files = set(index.keys()) | set(head_tree.keys())
 
-    for root, _, files in os.walk('.'):
-        if find_pygit_dir().split('/')[-1] in root: continue
+    for root, dirs, files in os.walk(repo_root):
+        if find_pygit_dir() in root:
+            continue
+
         for filename in files:
-            filepath = os.path.relpath(os.path.join(root, filename), '.')
+            filepath = os.path.relpath(os.path.join(root, filename), repo_root)
+            if is_ignored(filepath, gitignore_patterns):
+                continue
+
             if filepath not in all_tracked_files:
                 untracked_files.append(filepath)
                 continue
+
             if filepath not in index:
                 unstaged_changes['deleted'].append(filepath)
                 continue
+
             with open(filepath, 'rb') as f:
                 sha1 = hash_object(f.read(), 'blob')
             if sha1 != index[filepath]:
@@ -179,32 +197,81 @@ def checkout(name):
         return
 
     update_head(f'refs/heads/{name}')
-
-    with open(branch_path, 'r') as f:
-        commit_sha1 = f.read().strip()
-
+    commit_sha1 = get_branch_commit(name)
     tree_sha1 = get_commit_tree(commit_sha1)
     tree_contents = get_tree_contents(tree_sha1)
-
     write_index(tree_contents)
 
     index = read_index()
+    repo_root = os.path.dirname(pygit_dir)
     workdir_files = set()
-    for root, _, files in os.walk('.'):
-        if find_pygit_dir().split('/')[-1] in root: continue
+    for root, _, files in os.walk(repo_root):
+        if find_pygit_dir() in root: continue
         for filename in files:
-            filepath = os.path.relpath(os.path.join(root, filename), '.')
+            filepath = os.path.relpath(os.path.join(root, filename), repo_root)
             workdir_files.add(filepath)
 
     for filepath in workdir_files - set(index.keys()):
-        os.remove(filepath)
+        os.remove(os.path.join(repo_root, filepath))
 
     for filepath, sha1 in index.items():
-        dir_name = os.path.dirname(filepath)
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
+        full_path = os.path.join(repo_root, filepath)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
         _, content = read_object(sha1)
-        with open(filepath, 'wb') as f:
+        with open(full_path, 'wb') as f:
             f.write(content)
 
     print(f"Switched to branch '{name}'")
+
+
+def diff(staged=None):
+    if staged == '--staged':
+        # Diff between HEAD and index
+        head_commit = get_head_commit()
+        head_tree_sha = get_commit_tree(head_commit)
+        from_tree = get_tree_contents(head_tree_sha)
+        to_tree = read_index()
+        title = "Changes staged for commit"
+    else:
+        from_tree = read_index()
+        to_tree = {}
+        for filepath in from_tree:
+            if os.path.exists(filepath):
+                with open(filepath, 'rb') as f:
+                    to_tree[filepath] = hash_object(f.read())
+        title = "Changes not staged for commit"
+
+    print(title)
+    added, deleted, modified = compare_trees(from_tree, to_tree)
+
+    for f in added: print(f"Added: {f}")
+    for f in deleted: print(f"Deleted: {f}")
+    for f in modified:
+        diff_output = compare_files(from_tree[f], to_tree[f], f, f)
+        for line in diff_output:
+            print(line)
+
+
+def merge(branch_name):
+    head_commit = get_head_commit()
+    target_commit = get_branch_commit(branch_name)
+
+    if not target_commit:
+        print(f"Error: branch '{branch_name}' does not exist or has no commits.", file=sys.stderr)
+        return
+
+    history = {sha for sha, _ in get_commit_history(target_commit)}
+    if head_commit not in history:
+        print("Non-fast-forward merge is not supported.", file=sys.stderr)
+        return
+
+    current_branch_ref = get_head_ref()
+    pygit_dir = find_pygit_dir()
+    ref_full_path = os.path.join(pygit_dir, current_branch_ref)
+
+    with open(ref_full_path, 'w') as f:
+        f.write(target_commit)
+
+    print(f"Merged {branch_name} (fast-forward).")
+
+    checkout(get_head_ref().split('/')[-1])
