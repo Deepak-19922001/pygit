@@ -8,9 +8,11 @@ import fnmatch
 from .repository import find_pygit_dir, init as repo_init
 from .objects import read_object, hash_object, get_commit_tree, get_tree_contents
 from .index import read_index, write_index
-from .refs import get_head_ref, get_head_commit, update_head, get_branch_commit
+from .refs import get_head_ref, get_head_commit, update_head, get_branch_commit, create_tag, list_tags
 from .diff import compare_files, compare_trees
 from .utils import get_commit_history
+from .resolver import resolve_ref
+
 
 def read_gitignore():
     pygit_dir = find_pygit_dir()
@@ -24,10 +26,15 @@ def read_gitignore():
 
 
 def is_ignored(filepath, gitignore_patterns):
+    filepath = filepath.replace(os.sep, '/')
     for pattern in gitignore_patterns:
+        if pattern.endswith('/'):
+            if filepath.startswith(pattern) or filepath == pattern.rstrip('/'):
+                return True
         if fnmatch.fnmatch(filepath, pattern):
             return True
     return False
+
 
 def init():
     repo_init()
@@ -45,7 +52,6 @@ def add(filepath):
 
     with open(filepath, 'rb') as f:
         content = f.read()
-
     sha1 = hash_object(content, 'blob')
     if not sha1: return
 
@@ -82,13 +88,15 @@ def commit(*args):
 
     commit_sha1 = hash_object(commit_data, 'commit')
 
-    pygit_dir = find_pygit_dir()
     head_ref_path = get_head_ref()
-    ref_full_path = os.path.join(pygit_dir, head_ref_path)
+    if head_ref_path.startswith('refs/heads/'):
+        pygit_dir = find_pygit_dir()
+        ref_full_path = os.path.join(pygit_dir, head_ref_path)
+        os.makedirs(os.path.dirname(ref_full_path), exist_ok=True)
+        with open(ref_full_path, 'w') as f:
+            f.write(commit_sha1)
 
-    os.makedirs(os.path.dirname(ref_full_path), exist_ok=True)
-    with open(ref_full_path, 'w') as f:
-        f.write(commit_sha1)
+    update_head(commit_sha1, detached=not head_ref_path.startswith('refs/heads/'))
 
     write_index({})
     print(f"Committed, commit hash: {commit_sha1}")
@@ -107,6 +115,12 @@ def log():
 
 
 def status():
+    head_ref = get_head_ref()
+    if not head_ref.startswith('refs/heads/'):
+        print(f"HEAD detached at {get_head_commit()[:7]}")
+    else:
+        print(f"On branch {head_ref.split('/')[-1]}")
+
     gitignore_patterns = read_gitignore()
     head_commit = get_head_commit()
     head_tree_sha = get_commit_tree(head_commit)
@@ -114,7 +128,7 @@ def status():
     index = read_index()
 
     added, deleted, modified = compare_trees(head_tree, index)
-    print("Changes to be committed:")
+    print("\nChanges to be committed:")
     if not any([added, deleted, modified]): print("  (no changes staged)")
     for f in added: print(f"  new file:   {f}")
     for f in modified: print(f"  modified:   {f}")
@@ -124,12 +138,13 @@ def status():
     unstaged_changes = collections.defaultdict(list)
     untracked_files = []
 
-    repo_root = os.path.dirname(find_pygit_dir())
+    pygit_dir = find_pygit_dir()
+    repo_root = os.path.dirname(pygit_dir)
     all_tracked_files = set(index.keys()) | set(head_tree.keys())
 
     for root, dirs, files in os.walk(repo_root):
-        if find_pygit_dir() in root:
-            continue
+        if '.pygit' in dirs:
+            dirs.remove('.pygit')
 
         for filename in files:
             filepath = os.path.relpath(os.path.join(root, filename), repo_root)
@@ -144,7 +159,7 @@ def status():
                 unstaged_changes['deleted'].append(filepath)
                 continue
 
-            with open(filepath, 'rb') as f:
+            with open(os.path.join(repo_root, filepath), 'rb') as f:
                 sha1 = hash_object(f.read(), 'blob')
             if sha1 != index[filepath]:
                 unstaged_changes['modified'].append(filepath)
@@ -160,10 +175,11 @@ def status():
     for f in untracked_files: print(f"  {f}")
 
 
-def branch(branch_name=None):
+def branch(branch_name=None, start_point=None):
     pygit_dir = find_pygit_dir()
     heads_dir = os.path.join(pygit_dir, 'refs', 'heads')
-    current_branch = get_head_ref().split('/')[-1]
+    head_ref = get_head_ref()
+    current_branch = head_ref.split('/')[-1] if head_ref.startswith('refs/heads/') else None
 
     if not branch_name:
         branches = os.listdir(heads_dir)
@@ -179,34 +195,51 @@ def branch(branch_name=None):
         print(f"Error: branch '{branch_name}' already exists.", file=sys.stderr)
         return
 
-    head_commit = get_head_commit()
-    if not head_commit:
-        print("Error: Cannot create branch from an empty repository.", file=sys.stderr)
+    if start_point:
+        commit_hash = resolve_ref(start_point)
+        if not commit_hash:
+            print(f"Error: could not resolve '{start_point}' to a commit.", file=sys.stderr)
+            return
+    else:
+        commit_hash = get_head_commit()
+
+    if not commit_hash:
+        print("Error: Cannot create branch from an empty repository or invalid start point.", file=sys.stderr)
         return
 
     with open(new_branch_path, 'w') as f:
-        f.write(head_commit)
+        f.write(commit_hash)
     print(f"Branch '{branch_name}' created.")
 
 
 def checkout(name):
-    pygit_dir = find_pygit_dir()
-    branch_path = os.path.join(pygit_dir, 'refs', 'heads', name)
-    if not os.path.exists(branch_path):
-        print(f"Error: branch '{name}' not found.", file=sys.stderr)
+    commit_sha1 = resolve_ref(name)
+
+    if not commit_sha1:
+        print(f"Error: pathspec '{name}' did not match any file(s) known to pygit.", file=sys.stderr)
         return
 
-    update_head(f'refs/heads/{name}')
-    commit_sha1 = get_branch_commit(name)
+    is_branch = get_branch_commit(name) is not None
+
+    if is_branch:
+        update_head(f'refs/heads/{name}', detached=False)
+        print(f"Switched to branch '{name}'")
+    else:
+        update_head(commit_sha1, detached=True)
+        print(f"Note: switching to '{name}'.")
+        print("You are in 'detached HEAD' state.")
+
     tree_sha1 = get_commit_tree(commit_sha1)
     tree_contents = get_tree_contents(tree_sha1)
     write_index(tree_contents)
 
-    index = read_index()
+    pygit_dir = find_pygit_dir()
     repo_root = os.path.dirname(pygit_dir)
+    index = read_index()
     workdir_files = set()
-    for root, _, files in os.walk(repo_root):
-        if find_pygit_dir() in root: continue
+    for root, dirs, files in os.walk(repo_root):
+        if '.pygit' in dirs:
+            dirs.remove('.pygit')
         for filename in files:
             filepath = os.path.relpath(os.path.join(root, filename), repo_root)
             workdir_files.add(filepath)
@@ -221,17 +254,13 @@ def checkout(name):
         with open(full_path, 'wb') as f:
             f.write(content)
 
-    print(f"Switched to branch '{name}'")
-
 
 def diff(staged=None):
     if staged == '--staged':
-        # Diff between HEAD and index
         head_commit = get_head_commit()
         head_tree_sha = get_commit_tree(head_commit)
         from_tree = get_tree_contents(head_tree_sha)
         to_tree = read_index()
-        title = "Changes staged for commit"
     else:
         from_tree = read_index()
         to_tree = {}
@@ -239,9 +268,7 @@ def diff(staged=None):
             if os.path.exists(filepath):
                 with open(filepath, 'rb') as f:
                     to_tree[filepath] = hash_object(f.read())
-        title = "Changes not staged for commit"
 
-    print(title)
     added, deleted, modified = compare_trees(from_tree, to_tree)
 
     for f in added: print(f"Added: {f}")
@@ -273,5 +300,23 @@ def merge(branch_name):
         f.write(target_commit)
 
     print(f"Merged {branch_name} (fast-forward).")
-
     checkout(get_head_ref().split('/')[-1])
+
+
+def tag(tag_name=None, commit_ref=None):
+    if not tag_name:
+        tags = list_tags()
+        if not tags:
+            print("No tags found.")
+        for t in tags:
+            print(t)
+        return
+
+    commit_to_tag = commit_ref if commit_ref else get_head_commit()
+    sha1 = resolve_ref(commit_to_tag)
+    if not sha1:
+        print(f"Error: could not resolve '{commit_to_tag}' to a commit.")
+        return
+
+    if create_tag(tag_name, sha1):
+        print(f"Tag '{tag_name}' created for commit {sha1[:7]}")

@@ -17,10 +17,11 @@ def get_head_commit():
     pygit_dir = find_pygit_dir()
     head_ref_path = get_head_ref()
 
+    if len(head_ref_path) == 40 and all(c in '0123456789abcdef' for c in head_ref_path):
+        return head_ref_path
+
     ref_path = os.path.join(pygit_dir, head_ref_path)
     if not os.path.exists(ref_path):
-        if os.path.basename(head_ref_path) == head_ref_path:
-            return head_ref_path  # It's a raw SHA1
         return None
 
     with open(ref_path, 'r') as f:
@@ -36,11 +37,14 @@ def get_branch_commit(branch_name):
         return f.read().strip()
 
 
-def update_head(ref_path):
+def update_head(ref, detached=False):
     pygit_dir = find_pygit_dir()
     head_file = os.path.join(pygit_dir, 'HEAD')
     with open(head_file, 'w') as f:
-        f.write(f'ref: {ref_path}')
+        if detached:
+            f.write(ref)
+        else:
+            f.write(f'ref: {ref}')
 
 def create_tag(tag_name, commit_sha1):
     pygit_dir = find_pygit_dir()
