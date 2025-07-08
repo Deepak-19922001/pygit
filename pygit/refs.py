@@ -1,6 +1,7 @@
 import os
 import sys
 from .repository import find_pygit_dir
+from .objects import read_object, hash_object
 
 
 def get_head_ref():
@@ -47,7 +48,7 @@ def update_head(ref, detached=False):
             f.write(f'ref: {ref}')
 
 
-def create_tag(tag_name, commit_sha1):
+def create_tag(tag_name, target_sha1, message=None, tagger_string="PyGit Tagger <tagger@pygit.com>"):
     pygit_dir = find_pygit_dir()
     tags_dir = os.path.join(pygit_dir, 'refs', 'tags')
     os.makedirs(tags_dir, exist_ok=True)
@@ -57,8 +58,22 @@ def create_tag(tag_name, commit_sha1):
         print(f"Error: tag '{tag_name}' already exists.", file=sys.stderr)
         return False
 
+    if message:
+        obj_type, _ = read_object(target_sha1)
+        tag_content = (
+            f"object {target_sha1}\n"
+            f"type {obj_type}\n"
+            f"tag {tag_name}\n"
+            f"tagger {tagger_string}\n\n"
+            f"{message}\n"
+        ).encode()
+        tag_sha1 = hash_object(tag_content, 'tag')
+        ref_value = tag_sha1
+    else:
+        ref_value = target_sha1
+
     with open(tag_path, 'w') as f:
-        f.write(commit_sha1)
+        f.write(ref_value)
     return True
 
 
@@ -70,7 +85,7 @@ def list_tags():
     return sorted(os.listdir(tags_dir))
 
 
-def get_tag_commit(tag_name):
+def get_tag_ref(tag_name):
     pygit_dir = find_pygit_dir()
     tag_path = os.path.join(pygit_dir, 'refs', 'tags', tag_name)
     if not os.path.exists(tag_path):
@@ -88,6 +103,7 @@ def read_stash():
 
 
 def write_stash(stashes):
+    """Writes a list of stash commit hashes to the stash file."""
     pygit_dir = find_pygit_dir()
     stash_path = os.path.join(pygit_dir, 'refs', 'stash')
     with open(stash_path, 'w') as f:

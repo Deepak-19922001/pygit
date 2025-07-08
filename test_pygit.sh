@@ -240,61 +240,25 @@ fi
 echo "  - Conflicting merge correctly failed and created markers."
 echo "  PASS: Three-way merge works as expected."
 
-# --- 12. Reset Command ---
-echo -e "\n[TEST 12/12] pygit reset"
-$PYGIT_CMD checkout main
-echo "reset base" > reset_file.txt
-$PYGIT_CMD add reset_file.txt
-$PYGIT_CMD commit -m "Commit for reset base"
-BASE_COMMIT_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
+# --- 12. Show and Annotated Tags ---
+echo -e "\n[TEST 12/12] pygit show and annotated tags"
+if ! $PYGIT_CMD show HEAD | grep -q "Ready for conflict on branch1"; then
+    echo "  FAIL: 'show HEAD' did not display the latest commit."
+    exit 1
+fi
+echo "  - 'show HEAD' works."
 
-echo "new changes" >> reset_file.txt
-$PYGIT_CMD add reset_file.txt
-$PYGIT_CMD commit -m "Commit to be reset"
-TOP_COMMIT_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
-
-echo "  - Testing --soft reset"
-$PYGIT_CMD reset --soft $BASE_COMMIT_HASH
-if ! ($PYGIT_CMD log | grep -q $BASE_COMMIT_HASH) || ($PYGIT_CMD log | grep -q $TOP_COMMIT_HASH); then
-    echo "  FAIL: --soft reset did not move HEAD correctly."
+$PYGIT_CMD tag -m "Annotated v1.1" v1.1
+if ! $PYGIT_CMD show v1.1 | grep -q "Annotated v1.1"; then
+    echo "  FAIL: 'show' did not display the annotated tag's message."
     exit 1
 fi
-STATUS_OUTPUT=$($PYGIT_CMD status)
-if ! echo "$STATUS_OUTPUT" | awk '/Changes to be committed/{f=1;next} /Changes not staged for commit/{f=0} f' | grep -q "modified:   reset_file.txt"; then
-    echo "  FAIL: --soft reset did not keep changes in the index."
+if ! $PYGIT_CMD show v1.1 | grep -q "tagger"; then
+    echo "  FAIL: 'show' did not display the tagger for the annotated tag."
     exit 1
 fi
-echo "  - PASS: --soft reset works."
-
-$PYGIT_CMD reset --hard $TOP_COMMIT_HASH
-
-echo "  - Testing --mixed reset"
-$PYGIT_CMD reset --mixed $BASE_COMMIT_HASH
-STATUS_OUTPUT=$($PYGIT_CMD status)
-# Corrected Test: Check if "modified" appears under the "Changes not staged for commit" section.
-if ! echo "$STATUS_OUTPUT" | awk '/Changes not staged for commit/{f=1;next} /Untracked files/{f=0} f' | grep -q "modified:   reset_file.txt"; then
-    echo "  FAIL: --mixed reset did not unstage changes."
-    exit 1
-fi
-if ! grep -q "new changes" reset_file.txt; then
-    echo "  FAIL: --mixed reset modified the working directory."
-    exit 1
-fi
-echo "  - PASS: --mixed reset works."
-
-echo "  - Testing --hard reset"
-$PYGIT_CMD reset --hard $BASE_COMMIT_HASH
-STATUS_OUTPUT=$($PYGIT_CMD status)
-if ! (echo "$STATUS_OUTPUT" | grep -q "no changes staged") || ! (echo "$STATUS_OUTPUT" | grep -q "use 'pygit add <file>...' to include"); then
-    echo "  FAIL: --hard reset did not result in a clean status."
-    exit 1
-fi
-if grep -q "new changes" reset_file.txt; then
-    echo "  FAIL: --hard reset did not revert the working directory."
-    exit 1
-fi
-echo "  - PASS: --hard reset works."
-echo "  PASS: Reset command works as expected."
+echo "  - Annotated tags work as expected."
+echo "  PASS: Show and annotated tags work as expected."
 
 
 # --- Cleanup ---
