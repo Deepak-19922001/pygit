@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -u
+set -u # Treat unset variables as an error
 trap 'echo "FAIL: A command exited with an error. Test aborted."; exit 1' ERR
 
 # Find the directory where the script is located to build robust paths
@@ -17,7 +17,7 @@ echo "Test directory created at: $(pwd)"
 echo "--- Starting PyGit Test Suite ---"
 
 # --- 1. Init Command ---
-echo -e "\n[TEST 1/11] pygit init"
+echo -e "\n[TEST 1/12] pygit init"
 $PYGIT_CMD init
 if [ ! -d ".pygit" ]; then
     echo "  FAIL: .pygit directory was not created."
@@ -26,7 +26,7 @@ fi
 echo "  PASS: Repository initialized successfully."
 
 # --- 2. Add, Commit, and Log Commands ---
-echo -e "\n[TEST 2/11] pygit add, commit, log"
+echo -e "\n[TEST 2/12] pygit add, commit, log"
 echo "Hello, PyGit!" > file1.txt
 $PYGIT_CMD add file1.txt
 $PYGIT_CMD commit -m "Initial commit"
@@ -38,7 +38,7 @@ COMMIT1_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: add, commit, and log work as expected."
 
 # --- 3. Status and Diff Commands ---
-echo -e "\n[TEST 3/11] pygit status, diff"
+echo -e "\n[TEST 3/12] pygit status, diff"
 echo "A new line." >> file1.txt
 echo "untracked" > untracked.txt
 if ! $PYGIT_CMD status | grep -q "modified:   file1.txt"; then
@@ -64,7 +64,7 @@ COMMIT2_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: status and diff work as expected."
 
 # --- 4. Branch and Checkout Commands ---
-echo -e "\n[TEST 4/11] pygit branch, checkout"
+echo -e "\n[TEST 4/12] pygit branch, checkout"
 $PYGIT_CMD branch feature-branch $COMMIT1_HASH
 $PYGIT_CMD checkout feature-branch
 echo "feature" > feature-file.txt
@@ -78,7 +78,7 @@ fi
 echo "  PASS: branch and checkout work as expected."
 
 # --- 5. Tag and Detached HEAD ---
-echo -e "\n[TEST 5/11] pygit tag, detached HEAD"
+echo -e "\n[TEST 5/12] pygit tag, detached HEAD"
 $PYGIT_CMD checkout $COMMIT1_HASH
 if ! $PYGIT_CMD status | grep -q "HEAD detached at"; then
     echo "  FAIL: 'status' did not report a detached HEAD."
@@ -93,7 +93,7 @@ fi
 echo "  PASS: tag and detached HEAD work as expected."
 
 # --- 6. .gitignore Functionality ---
-echo -e "\n[TEST 6/11] .gitignore"
+echo -e "\n[TEST 6/12] .gitignore"
 echo "*.log" > .gitignore
 echo "temp/" >> .gitignore
 touch app.log
@@ -109,7 +109,7 @@ fi
 echo "  PASS: .gitignore works as expected."
 
 # --- 7. RM Command ---
-echo -e "\n[TEST 7/11] pygit rm"
+echo -e "\n[TEST 7/12] pygit rm"
 $PYGIT_CMD add untracked.txt
 $PYGIT_CMD commit -m "Add untracked.txt to track it"
 $PYGIT_CMD rm untracked.txt
@@ -125,7 +125,7 @@ fi
 echo "  PASS: rm works as expected."
 
 # --- 8. Stash Command ---
-echo -e "\n[TEST 8/11] pygit stash"
+echo -e "\n[TEST 8/12] pygit stash"
 echo "stashed content" > stash-test.txt
 $PYGIT_CMD add stash-test.txt
 echo "more stashed content" >> stash-test.txt
@@ -153,7 +153,7 @@ echo "  - Stash pop works as expected."
 echo "  PASS: Stash command works as expected."
 
 # --- 9. Clean Command ---
-echo -e "\n[TEST 9/11] pygit clean"
+echo -e "\n[TEST 9/12] pygit clean"
 echo "untracked file to clean" > clean-me.txt
 mkdir clean-dir && echo "data" > clean-dir/file.txt
 if ! $PYGIT_CMD clean -n | grep -q "Would remove clean-me.txt"; then
@@ -182,7 +182,7 @@ echo "  - Force clean for directories works as expected."
 echo "  PASS: Clean command works as expected."
 
 # --- 10. Config Command ---
-echo -e "\n[TEST 10/11] pygit config"
+echo -e "\n[TEST 10/12] pygit config"
 $PYGIT_CMD config user.name "Test User"
 $PYGIT_CMD config user.email "test@example.com"
 if ! $PYGIT_CMD config user.name | grep -q "Test User"; then
@@ -199,13 +199,12 @@ fi
 echo "  - Commit correctly uses configured user."
 echo "  PASS: Config command works as expected."
 
-# --- 11. Three-Way Merge ---
-echo -e "\n[TEST 11/11] Three-way merge"
+# --- 11. Merge Command ---
+echo -e "\n[TEST 11/12] Three-way merge"
 $PYGIT_CMD checkout $COMMIT1_HASH
 $PYGIT_CMD branch branch1
 $PYGIT_CMD branch branch2
 
-# Successful merge
 $PYGIT_CMD checkout branch1
 echo "b1" > b1.txt
 $PYGIT_CMD add b1.txt
@@ -222,7 +221,6 @@ if [ ! -f "b1.txt" ] || [ ! -f "b2.txt" ]; then
 fi
 echo "  - Successful three-way merge works as expected."
 
-# Conflicting merge
 echo "conflict1" > conflict.txt
 $PYGIT_CMD add conflict.txt
 $PYGIT_CMD commit -m "Ready for conflict on branch1"
@@ -241,6 +239,62 @@ if ! grep -q "<<<<<<< HEAD" conflict.txt; then
 fi
 echo "  - Conflicting merge correctly failed and created markers."
 echo "  PASS: Three-way merge works as expected."
+
+# --- 12. Reset Command ---
+echo -e "\n[TEST 12/12] pygit reset"
+$PYGIT_CMD checkout main
+echo "reset base" > reset_file.txt
+$PYGIT_CMD add reset_file.txt
+$PYGIT_CMD commit -m "Commit for reset base"
+BASE_COMMIT_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
+
+echo "new changes" >> reset_file.txt
+$PYGIT_CMD add reset_file.txt
+$PYGIT_CMD commit -m "Commit to be reset"
+TOP_COMMIT_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
+
+echo "  - Testing --soft reset"
+$PYGIT_CMD reset --soft $BASE_COMMIT_HASH
+if ! ($PYGIT_CMD log | grep -q $BASE_COMMIT_HASH) || ($PYGIT_CMD log | grep -q $TOP_COMMIT_HASH); then
+    echo "  FAIL: --soft reset did not move HEAD correctly."
+    exit 1
+fi
+STATUS_OUTPUT=$($PYGIT_CMD status)
+if ! echo "$STATUS_OUTPUT" | awk '/Changes to be committed/{f=1;next} /Changes not staged for commit/{f=0} f' | grep -q "modified:   reset_file.txt"; then
+    echo "  FAIL: --soft reset did not keep changes in the index."
+    exit 1
+fi
+echo "  - PASS: --soft reset works."
+
+$PYGIT_CMD reset --hard $TOP_COMMIT_HASH
+
+echo "  - Testing --mixed reset"
+$PYGIT_CMD reset --mixed $BASE_COMMIT_HASH
+STATUS_OUTPUT=$($PYGIT_CMD status)
+# Corrected Test: Check if "modified" appears under the "Changes not staged for commit" section.
+if ! echo "$STATUS_OUTPUT" | awk '/Changes not staged for commit/{f=1;next} /Untracked files/{f=0} f' | grep -q "modified:   reset_file.txt"; then
+    echo "  FAIL: --mixed reset did not unstage changes."
+    exit 1
+fi
+if ! grep -q "new changes" reset_file.txt; then
+    echo "  FAIL: --mixed reset modified the working directory."
+    exit 1
+fi
+echo "  - PASS: --mixed reset works."
+
+echo "  - Testing --hard reset"
+$PYGIT_CMD reset --hard $BASE_COMMIT_HASH
+STATUS_OUTPUT=$($PYGIT_CMD status)
+if ! (echo "$STATUS_OUTPUT" | grep -q "no changes staged") || ! (echo "$STATUS_OUTPUT" | grep -q "use 'pygit add <file>...' to include"); then
+    echo "  FAIL: --hard reset did not result in a clean status."
+    exit 1
+fi
+if grep -q "new changes" reset_file.txt; then
+    echo "  FAIL: --hard reset did not revert the working directory."
+    exit 1
+fi
+echo "  - PASS: --hard reset works."
+echo "  PASS: Reset command works as expected."
 
 
 # --- Cleanup ---

@@ -426,7 +426,6 @@ def merge(branch_name):
 
     print(f"Merge made by the 'three-way' strategy. New commit: {merge_commit_sha[:7]}")
 
-    # Update working directory and index
     write_index(merged_tree)
     checkout(get_head_ref().split('/')[-1])
 
@@ -617,3 +616,69 @@ def config(*args):
     else:
         print("Usage: pygit config <key> [<value>]", file=sys.stderr)
         return False
+
+
+def reset(*args):
+    mode = '--mixed'
+    if '--soft' in args:
+        mode = '--soft'
+    elif '--hard' in args:
+        mode = '--hard'
+
+    commit_ref = None
+    for arg in reversed(args):
+        if not arg.startswith('--'):
+            commit_ref = arg
+            break
+
+    if not commit_ref:
+        commit_ref = 'HEAD'
+
+    commit_sha1 = resolve_ref(commit_ref)
+    if not commit_sha1:
+        print(f"fatal: Could not resolve '{commit_ref}' to a commit.", file=sys.stderr)
+        return False
+
+    head_ref_path = get_head_ref()
+    if not head_ref_path.startswith('refs/heads/'):
+        print("fatal: Cannot reset in detached HEAD state.", file=sys.stderr)
+        return False
+
+    pygit_dir = find_pygit_dir()
+    branch_path = os.path.join(pygit_dir, head_ref_path)
+    with open(branch_path, 'w') as f:
+        f.write(commit_sha1)
+
+    print(f"HEAD is now at {commit_sha1[:7]}")
+
+    if mode == '--soft':
+        return
+
+    new_head_tree_sha = get_commit_tree(commit_sha1)
+    new_head_tree = get_tree_contents(new_head_tree_sha)
+    write_index(new_head_tree)
+
+    if mode == '--mixed':
+        return
+
+    repo_root = os.path.dirname(pygit_dir)
+
+    workdir_files = set()
+    for root, dirs, files in os.walk(repo_root):
+        if '.pygit' in dirs:
+            dirs.remove('.pygit')
+        for filename in files:
+            filepath = os.path.relpath(os.path.join(root, filename), repo_root)
+            workdir_files.add(filepath)
+
+    for filepath in workdir_files - set(new_head_tree.keys()):
+        os.remove(os.path.join(repo_root, filepath))
+
+    for filepath, sha1 in new_head_tree.items():
+        full_path = os.path.join(repo_root, filepath)
+        dir_name = os.path.dirname(full_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        _, content = read_object(sha1)
+        with open(full_path, 'wb') as f:
+            f.write(content)
