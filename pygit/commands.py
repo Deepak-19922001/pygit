@@ -602,6 +602,116 @@ def config(*args):
         return False
 
 
+def rebase(target_branch):
+    """
+    Rebase the current branch onto the target branch.
+    This rewrites the commit history by replaying commits from the current branch
+    on top of the target branch.
+    """
+    # Get the current branch name and HEAD commit
+    current_ref = get_head_ref()
+    if not current_ref.startswith('refs/heads/'):
+        print("Cannot rebase: HEAD is detached.", file=sys.stderr)
+        return False
+    current_branch = current_ref.split('/')[-1]
+    current_commit = get_head_commit()
+
+    # Get the target branch commit
+    target_commit = get_branch_commit(target_branch)
+    if not target_commit:
+        print(f"Error: Branch '{target_branch}' does not exist.", file=sys.stderr)
+        return False
+
+    # Check if rebase is necessary
+    if current_commit == target_commit:
+        print("Already up to date.")
+        return True
+
+    # Find the common ancestor
+    base_commit = find_common_ancestor(current_commit, target_commit)
+    if not base_commit:
+        print("Error: No common ancestor found.", file=sys.stderr)
+        return False
+
+    print(f"Rebasing {current_branch} onto {target_branch}")
+    print(f"Common ancestor is {base_commit[:7]}")
+
+    # Get the list of commits to replay (from oldest to newest)
+    commits_to_replay = []
+    target_history = get_full_history_set(target_commit)
+
+    # Walk through the current branch's history until we reach the common ancestor
+    for commit_sha, content in get_commit_history(current_commit):
+        if commit_sha in target_history or commit_sha == base_commit:
+            break
+        commits_to_replay.append((commit_sha, content))
+
+    # Reverse the list to get oldest first
+    commits_to_replay.reverse()
+
+    if not commits_to_replay:
+        print("No commits to replay. Already up to date.")
+        return True
+
+    # Temporarily detach HEAD and point it to the target branch
+    update_head(target_commit, detached=True)
+
+    # Get the target branch tree
+    target_tree = get_tree_contents(get_commit_tree(target_commit))
+
+    # Checkout the target branch to update the working directory
+    pygit_dir = find_pygit_dir()
+    repo_root = os.path.dirname(pygit_dir)
+
+    # Update the working directory to match the target branch
+    for filepath, sha1 in target_tree.items():
+        full_path = os.path.join(repo_root, filepath)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        _, content = read_object(sha1)
+        with open(full_path, 'wb') as f:
+            f.write(content)
+
+    # Replay each commit
+    new_base = target_commit
+    for commit_sha, content in commits_to_replay:
+        # Extract commit message
+        message_start = content.find(b'\n\n') + 2
+        message = content[message_start:].decode().strip()
+
+        # Get the tree from the original commit
+        original_tree = get_tree_contents(get_commit_tree(commit_sha))
+
+        # Create a new tree that combines the target tree and the original tree
+        combined_tree = target_tree.copy()
+        combined_tree.update(original_tree)
+
+        # Hash the combined tree
+        combined_tree_sha = hash_object(json.dumps(combined_tree, sort_keys=True).encode(), 'tree')
+
+        # Create a new commit with the combined tree and new parent
+        new_commit = _create_commit(message, combined_tree_sha, [new_base])
+
+        # Update the base for the next commit
+        new_base = new_commit
+
+        # Update the target tree for the next commit
+        target_tree = combined_tree
+
+        print(f"Replayed commit: {commit_sha[:7]} -> {new_commit[:7]}")
+
+    # Update the branch reference to point to the new tip
+    pygit_dir = find_pygit_dir()
+    branch_path = os.path.join(pygit_dir, current_ref)
+    with open(branch_path, 'w') as f:
+        f.write(new_base)
+
+    # Checkout the branch to update the working directory
+    checkout(current_branch)
+
+    print(f"Successfully rebased {current_branch} onto {target_branch}")
+    return True
+
+
 def show(ref_name='HEAD'):
     # First try to resolve as a tag
     from .refs import get_tag_ref

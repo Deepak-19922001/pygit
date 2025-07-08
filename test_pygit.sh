@@ -241,7 +241,7 @@ echo "  - Conflicting merge correctly failed and created markers."
 echo "  PASS: Three-way merge works as expected."
 
 # --- 12. Show and Annotated Tags ---
-echo -e "\n[TEST 12/12] pygit show and annotated tags"
+echo -e "\n[TEST 12/13] pygit show and annotated tags"
 if ! $PYGIT_CMD show HEAD | grep -q "Ready for conflict on branch1"; then
     echo "  FAIL: 'show HEAD' did not display the latest commit."
     exit 1
@@ -259,6 +259,93 @@ if ! $PYGIT_CMD show v1.1 | grep -q "tagger"; then
 fi
 echo "  - Annotated tags work as expected."
 echo "  PASS: Show and annotated tags work as expected."
+
+# --- 13. Rebase Command ---
+echo -e "\n[TEST 13/13] pygit rebase"
+# Create a new repository for rebase testing
+rm -rf "$TEST_DIR"
+mkdir -p "$TEST_DIR"
+cd "$TEST_DIR"
+$PYGIT_CMD init
+
+# Create a base commit
+echo "Base content" > base.txt
+$PYGIT_CMD add base.txt
+$PYGIT_CMD commit -m "Base commit"
+
+# Get the base commit hash
+BASE_COMMIT=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
+
+# Create two branches from the base commit
+$PYGIT_CMD checkout $BASE_COMMIT
+$PYGIT_CMD branch feature
+$PYGIT_CMD branch main-branch
+
+# Make changes on main-branch (target branch for rebase)
+$PYGIT_CMD checkout main-branch
+echo "Main branch content" > main.txt
+$PYGIT_CMD add main.txt
+$PYGIT_CMD commit -m "Commit on main branch"
+
+# Make changes on feature branch (branch to be rebased)
+$PYGIT_CMD checkout feature
+echo "Feature commit 1" > feature1.txt
+$PYGIT_CMD add feature1.txt
+$PYGIT_CMD commit -m "Feature commit 1"
+
+echo "Feature commit 2" > feature2.txt
+$PYGIT_CMD add feature2.txt
+$PYGIT_CMD commit -m "Feature commit 2"
+
+# Rebase feature onto main-branch
+$PYGIT_CMD rebase main-branch
+
+# Verify that the feature branch now contains the main branch commit
+if ! $PYGIT_CMD log | grep -q "Commit on main branch"; then
+    echo "  FAIL: After rebase, feature branch does not contain main branch commit."
+    exit 1
+fi
+echo "  - Feature branch contains main branch commit after rebase."
+
+# Verify that the feature branch commits are still present
+if ! $PYGIT_CMD log | grep -q "Feature commit 1"; then
+    echo "  FAIL: After rebase, feature branch does not contain Feature commit 1."
+    exit 1
+fi
+if ! $PYGIT_CMD log | grep -q "Feature commit 2"; then
+    echo "  FAIL: After rebase, feature branch does not contain Feature commit 2."
+    exit 1
+fi
+echo "  - Feature branch commits are preserved after rebase."
+
+# Verify that both files from feature branch and main branch exist
+if [ ! -f "main.txt" ]; then
+    echo "  FAIL: After rebase, main.txt from main branch does not exist."
+    exit 1
+fi
+if [ ! -f "feature1.txt" ]; then
+    echo "  FAIL: After rebase, feature1.txt from feature branch does not exist."
+    exit 1
+fi
+if [ ! -f "feature2.txt" ]; then
+    echo "  FAIL: After rebase, feature2.txt from feature branch does not exist."
+    exit 1
+fi
+echo "  - Files from both branches exist after rebase."
+
+# Verify the commit order (main branch commit should be before feature commits)
+LOG_OUTPUT=$($PYGIT_CMD log)
+if ! echo "$LOG_OUTPUT" | grep -A10 "Feature commit 2" | grep -q "Feature commit 1"; then
+    echo "  FAIL: Commit order is incorrect after rebase."
+    exit 1
+fi
+if ! echo "$LOG_OUTPUT" | grep -A20 "Feature commit 1" | grep -q "Commit on main branch"; then
+    echo "  FAIL: Commit order is incorrect after rebase."
+    exit 1
+fi
+echo "  - Commit order is correct after rebase."
+
+echo "  PASS: Rebase command works as expected."
 
 
 # --- Cleanup ---

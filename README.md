@@ -9,6 +9,7 @@ PyGit implements many of the core Git features:
 - **Repository Management**: Initialize repositories with `init`
 - **Version Control**: Track changes with `add`, `commit`, and view history with `log`
 - **Branching and Merging**: Create and switch branches with `branch` and `checkout`, merge with `merge`
+- **Rebasing**: Rewrite commit history with `rebase` for a cleaner, linear history
 - **Tagging**: Mark specific points in history with `tag`
 - **Stashing**: Temporarily store changes with `stash`
 - **Configuration**: Set repository-specific settings with `config`
@@ -91,6 +92,11 @@ python3 pygit.py stash pop
 ### Merge Branches
 ```bash
 python3 pygit.py merge branch-name
+```
+
+### Rebase Branches
+```bash
+python3 pygit.py rebase target-branch
 ```
 
 ### Clean Untracked Files
