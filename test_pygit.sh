@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 set -u
 trap 'echo "FAIL: A command exited with an error. Test aborted."; exit 1' ERR
 
@@ -18,7 +17,7 @@ echo "Test directory created at: $(pwd)"
 echo "--- Starting PyGit Test Suite ---"
 
 # --- 1. Init Command ---
-echo -e "\n[TEST 1/9] pygit init"
+echo -e "\n[TEST 1/11] pygit init"
 $PYGIT_CMD init
 if [ ! -d ".pygit" ]; then
     echo "  FAIL: .pygit directory was not created."
@@ -27,7 +26,7 @@ fi
 echo "  PASS: Repository initialized successfully."
 
 # --- 2. Add, Commit, and Log Commands ---
-echo -e "\n[TEST 2/9] pygit add, commit, log"
+echo -e "\n[TEST 2/11] pygit add, commit, log"
 echo "Hello, PyGit!" > file1.txt
 $PYGIT_CMD add file1.txt
 $PYGIT_CMD commit -m "Initial commit"
@@ -39,7 +38,7 @@ COMMIT1_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: add, commit, and log work as expected."
 
 # --- 3. Status and Diff Commands ---
-echo -e "\n[TEST 3/9] pygit status, diff"
+echo -e "\n[TEST 3/11] pygit status, diff"
 echo "A new line." >> file1.txt
 echo "untracked" > untracked.txt
 if ! $PYGIT_CMD status | grep -q "modified:   file1.txt"; then
@@ -65,7 +64,7 @@ COMMIT2_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: status and diff work as expected."
 
 # --- 4. Branch and Checkout Commands ---
-echo -e "\n[TEST 4/9] pygit branch, checkout"
+echo -e "\n[TEST 4/11] pygit branch, checkout"
 $PYGIT_CMD branch feature-branch $COMMIT1_HASH
 $PYGIT_CMD checkout feature-branch
 echo "feature" > feature-file.txt
@@ -79,7 +78,7 @@ fi
 echo "  PASS: branch and checkout work as expected."
 
 # --- 5. Tag and Detached HEAD ---
-echo -e "\n[TEST 5/9] pygit tag, detached HEAD"
+echo -e "\n[TEST 5/11] pygit tag, detached HEAD"
 $PYGIT_CMD checkout $COMMIT1_HASH
 if ! $PYGIT_CMD status | grep -q "HEAD detached at"; then
     echo "  FAIL: 'status' did not report a detached HEAD."
@@ -94,7 +93,7 @@ fi
 echo "  PASS: tag and detached HEAD work as expected."
 
 # --- 6. .gitignore Functionality ---
-echo -e "\n[TEST 6/9] .gitignore"
+echo -e "\n[TEST 6/11] .gitignore"
 echo "*.log" > .gitignore
 echo "temp/" >> .gitignore
 touch app.log
@@ -109,8 +108,8 @@ if $PYGIT_CMD status | grep -q "temp/data.txt"; then
 fi
 echo "  PASS: .gitignore works as expected."
 
-# --- 7. RM and Merge Commands ---
-echo -e "\n[TEST 7/9] pygit rm and merge"
+# --- 7. RM Command ---
+echo -e "\n[TEST 7/11] pygit rm"
 $PYGIT_CMD add untracked.txt
 $PYGIT_CMD commit -m "Add untracked.txt to track it"
 $PYGIT_CMD rm untracked.txt
@@ -123,43 +122,10 @@ if ! echo "$STATUS_OUTPUT" | awk '/Changes to be committed/{f=1;next} /Changes n
     echo "  FAIL: 'rm' did not stage the deletion."
     exit 1
 fi
-echo "  - rm works as expected."
-
-# Non-fast-forward (should fail)
-$PYGIT_CMD checkout main
-$PYGIT_CMD branch non-ff-branch
-echo "main change" >> file1.txt
-$PYGIT_CMD add file1.txt
-$PYGIT_CMD commit -m "Diverge main"
-$PYGIT_CMD checkout non-ff-branch
-echo "branch change" >> file1.txt
-$PYGIT_CMD add file1.txt
-$PYGIT_CMD commit -m "Diverge branch"
-$PYGIT_CMD checkout main
-if $PYGIT_CMD merge non-ff-branch; then
-    echo "  FAIL: Non-fast-forward merge was expected to fail but succeeded."
-    exit 1
-fi
-echo "  - Non-fast-forward merge correctly failed."
-
-# Fast-forward (should succeed)
-$PYGIT_CMD branch ff-branch
-$PYGIT_CMD checkout ff-branch
-echo "ff" > ff.txt
-$PYGIT_CMD add ff.txt
-$PYGIT_CMD commit -m "Fast-forward commit"
-FF_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
-$PYGIT_CMD checkout main
-$PYGIT_CMD merge ff-branch
-if ! $PYGIT_CMD log | grep -q "$FF_HASH"; then
-    echo "  FAIL: Fast-forward merge failed; commit not in main's history."
-    exit 1
-fi
-echo "  - Fast-forward merge correctly succeeded."
-echo "  PASS: rm and merge work as expected."
+echo "  PASS: rm works as expected."
 
 # --- 8. Stash Command ---
-echo -e "\n[TEST 8/9] pygit stash"
+echo -e "\n[TEST 8/11] pygit stash"
 echo "stashed content" > stash-test.txt
 $PYGIT_CMD add stash-test.txt
 echo "more stashed content" >> stash-test.txt
@@ -187,7 +153,7 @@ echo "  - Stash pop works as expected."
 echo "  PASS: Stash command works as expected."
 
 # --- 9. Clean Command ---
-echo -e "\n[TEST 9/9] pygit clean"
+echo -e "\n[TEST 9/11] pygit clean"
 echo "untracked file to clean" > clean-me.txt
 mkdir clean-dir && echo "data" > clean-dir/file.txt
 if ! $PYGIT_CMD clean -n | grep -q "Would remove clean-me.txt"; then
@@ -207,7 +173,6 @@ if [ -f "clean-me.txt" ]; then
 fi
 echo "  - Force clean for files works as expected."
 
-# Force clean directories
 $PYGIT_CMD clean -f -d
 if [ -d "clean-dir" ]; then
     echo "  FAIL: Clean with -fd did not remove the directory."
@@ -216,7 +181,69 @@ fi
 echo "  - Force clean for directories works as expected."
 echo "  PASS: Clean command works as expected."
 
+# --- 10. Config Command ---
+echo -e "\n[TEST 10/11] pygit config"
+$PYGIT_CMD config user.name "Test User"
+$PYGIT_CMD config user.email "test@example.com"
+if ! $PYGIT_CMD config user.name | grep -q "Test User"; then
+    echo "  FAIL: Config did not get user.name correctly."
+    exit 1
+fi
+echo "  - Config set and get work as expected."
 
+$PYGIT_CMD commit -m "Config test commit"
+if ! $PYGIT_CMD log | grep -q "Author: Test User <test@example.com>"; then
+    echo "  FAIL: Commit did not use configured author."
+    exit 1
+fi
+echo "  - Commit correctly uses configured user."
+echo "  PASS: Config command works as expected."
+
+# --- 11. Three-Way Merge ---
+echo -e "\n[TEST 11/11] Three-way merge"
+$PYGIT_CMD checkout $COMMIT1_HASH
+$PYGIT_CMD branch branch1
+$PYGIT_CMD branch branch2
+
+# Successful merge
+$PYGIT_CMD checkout branch1
+echo "b1" > b1.txt
+$PYGIT_CMD add b1.txt
+$PYGIT_CMD commit -m "Commit on branch1"
+$PYGIT_CMD checkout branch2
+echo "b2" > b2.txt
+$PYGIT_CMD add b2.txt
+$PYGIT_CMD commit -m "Commit on branch2"
+$PYGIT_CMD checkout branch1
+$PYGIT_CMD merge branch2
+if [ ! -f "b1.txt" ] || [ ! -f "b2.txt" ]; then
+    echo "  FAIL: Successful merge did not contain files from both branches."
+    exit 1
+fi
+echo "  - Successful three-way merge works as expected."
+
+# Conflicting merge
+echo "conflict1" > conflict.txt
+$PYGIT_CMD add conflict.txt
+$PYGIT_CMD commit -m "Ready for conflict on branch1"
+$PYGIT_CMD checkout branch2
+echo "conflict2" > conflict.txt
+$PYGIT_CMD add conflict.txt
+$PYGIT_CMD commit -m "Create conflict on branch2"
+$PYGIT_CMD checkout branch1
+if $PYGIT_CMD merge branch2; then
+    echo "  FAIL: Conflicting merge was expected to fail but succeeded."
+    exit 1
+fi
+if ! grep -q "<<<<<<< HEAD" conflict.txt; then
+    echo "  FAIL: Conflict markers not found in conflicted file."
+    exit 1
+fi
+echo "  - Conflicting merge correctly failed and created markers."
+echo "  PASS: Three-way merge works as expected."
+
+
+# --- Cleanup ---
 cd ..
 rm -rf "$TEST_DIR"
 echo -e "\n--- PyGit Test Suite Completed Successfully ---"

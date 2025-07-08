@@ -12,8 +12,9 @@ from .index import read_index, write_index
 from .refs import get_head_ref, get_head_commit, update_head, get_branch_commit, create_tag, list_tags, read_stash, \
     write_stash
 from .diff import compare_files, compare_trees
-from .utils import get_commit_history
+from .utils import get_commit_history, find_common_ancestor, get_full_history_set
 from .resolver import resolve_ref
+from .config import read_config, write_config
 
 
 def read_gitignore():
@@ -85,6 +86,26 @@ def rm(filepath):
     print(f"rm '{filepath}'")
 
 
+def _create_commit(message, tree_sha1, parents):
+    """Internal helper to create a commit object."""
+    config = read_config()
+    author_name = config.get('user.name', 'PyGit User')
+    author_email = config.get('user.email', 'user@pygit.com')
+    author_string = f"{author_name} <{author_email}>"
+
+    parent_lines = "".join(f"parent {p}\n" for p in parents)
+
+    commit_data = (
+        f"tree {tree_sha1}\n"
+        f"{parent_lines}"
+        f"author {author_string} {datetime.now().isoformat()}\n"
+        f"committer {author_string} {datetime.now().isoformat()}\n"
+        f"\n"
+        f"{message}\n"
+    ).encode()
+    return hash_object(commit_data, 'commit')
+
+
 def commit(*args):
     if not args or args[0] != '-m' or len(args) < 2:
         print("Usage: pygit commit -m <message>", file=sys.stderr)
@@ -96,23 +117,13 @@ def commit(*args):
         print("Nothing to commit, staging area is empty.")
         return
 
-    tree_data = json.dumps(index, sort_keys=True).encode()
-    tree_sha1 = hash_object(tree_data, 'tree')
+    tree_sha1 = hash_object(json.dumps(index, sort_keys=True).encode(), 'tree')
     parent_sha1 = get_head_commit()
+    parents = [parent_sha1] if parent_sha1 else []
 
-    commit_data = (
-        f"tree {tree_sha1}\n"
-        f"parent {parent_sha1}\n"
-        f"author PyGit User <user@pygit.com> {datetime.now().isoformat()}\n"
-        f"committer PyGit User <user@pygit.com> {datetime.now().isoformat()}\n"
-        f"\n"
-        f"{message}\n"
-    ).encode()
-
-    commit_sha1 = hash_object(commit_data, 'commit')
+    commit_sha1 = _create_commit(message, tree_sha1, parents)
 
     head_ref = get_head_ref()
-
     if head_ref.startswith('refs/heads/'):
         pygit_dir = find_pygit_dir()
         branch_path = os.path.join(pygit_dir, head_ref)
@@ -325,25 +336,98 @@ def diff(staged=None):
 
 def merge(branch_name):
     head_commit = get_head_commit()
-    target_commit = get_branch_commit(branch_name)
+    other_commit = get_branch_commit(branch_name)
 
-    if not target_commit:
-        print(f"Error: branch '{branch_name}' does not exist or has no commits.", file=sys.stderr)
+    if not other_commit:
+        print(f"Error: branch '{branch_name}' not found.", file=sys.stderr)
         return False
 
-    history = {sha for sha, _ in get_commit_history(target_commit)}
-    if head_commit not in history:
-        print("Non-fast-forward merge is not supported.", file=sys.stderr)
+    if head_commit == other_commit:
+        print("Already up to date.")
+        return
+
+    head_history = get_full_history_set(head_commit)
+    if other_commit in head_history:
+        print("Already up to date.")
+        return
+
+    other_history = get_full_history_set(other_commit)
+    if head_commit in other_history:
+        print(f"Fast-forwarding to {branch_name}")
+        checkout(branch_name)
+        return
+
+    base_commit = find_common_ancestor(head_commit, other_commit)
+    if not base_commit:
+        print("Error: No common ancestor found.", file=sys.stderr)
         return False
 
-    current_branch_ref = get_head_ref()
+    print(f"Merging {branch_name} into {get_head_ref().split('/')[-1]}")
+    print(f"Common ancestor is {base_commit[:7]}")
+
+    base_tree = get_tree_contents(get_commit_tree(base_commit))
+    head_tree = get_tree_contents(get_commit_tree(head_commit))
+    other_tree = get_tree_contents(get_commit_tree(other_commit))
+
+    all_files = set(base_tree.keys()) | set(head_tree.keys()) | set(other_tree.keys())
+
+    merged_tree = head_tree.copy()
+    conflicts = []
+
+    for path in sorted(list(all_files)):
+        base_hash = base_tree.get(path)
+        head_hash = head_tree.get(path)
+        other_hash = other_tree.get(path)
+
+        if base_hash == head_hash:
+            if other_hash:
+                merged_tree[path] = other_hash
+        elif base_hash == other_hash:
+            pass
+        elif head_hash != other_hash:
+            conflicts.append(path)
+        else:
+            pass
+
+    if conflicts:
+        print("Automatic merge failed; fix conflicts and then commit the result.")
+        for path in conflicts:
+            _, head_content = read_object(head_tree[path])
+            _, other_content = read_object(other_tree[path])
+
+            conflict_content = (
+                    b'<<<<<<< HEAD\n' +
+                    head_content +
+                    b'=======\n' +
+                    other_content +
+                    b'>>>>>>> ' + branch_name.encode() + b'\n'
+            )
+            with open(path, 'wb') as f:
+                f.write(conflict_content)
+            merged_tree[path] = hash_object(conflict_content, 'blob')
+        write_index(merged_tree)
+        return False
+
+    print("Automatic merge successful.")
+
+    commit_message = f"Merge branch '{branch_name}'"
+    merged_tree_sha = hash_object(json.dumps(merged_tree, sort_keys=True).encode(), 'tree')
+    merge_commit_sha = _create_commit(
+        commit_message,
+        merged_tree_sha,
+        [head_commit, other_commit]
+    )
+
+    head_ref = get_head_ref()
     pygit_dir = find_pygit_dir()
-    ref_full_path = os.path.join(pygit_dir, current_branch_ref)
+    branch_path = os.path.join(pygit_dir, head_ref)
+    with open(branch_path, 'w') as f:
+        f.write(merge_commit_sha)
 
-    with open(ref_full_path, 'w') as f:
-        f.write(target_commit)
+    print(f"Merge made by the 'three-way' strategy. New commit: {merge_commit_sha[:7]}")
 
-    print(f"Merged {branch_name} (fast-forward).")
+    # Update working directory and index
+    write_index(merged_tree)
     checkout(get_head_ref().split('/')[-1])
 
 
@@ -510,3 +594,26 @@ def clean(*args):
             shutil.rmtree(os.path.join(repo_root, d))
         except OSError as e:
             print(f"Error removing directory {d}: {e}", file=sys.stderr)
+
+
+def config(*args):
+    if len(args) == 0:
+        print("Usage: pygit config <key> [<value>]", file=sys.stderr)
+        return False
+
+    key = args[0]
+    config_data = read_config()
+
+    if len(args) == 1:
+        value = config_data.get(key)
+        if value:
+            print(value)
+        else:
+            return False
+    elif len(args) == 2:
+        value = args[1]
+        config_data[key] = value
+        write_config(config_data)
+    else:
+        print("Usage: pygit config <key> [<value>]", file=sys.stderr)
+        return False
