@@ -4,6 +4,7 @@ import collections
 from datetime import datetime
 import json
 import fnmatch
+import shutil
 
 from .repository import find_pygit_dir, init as repo_init
 from .objects import read_object, hash_object, get_commit_tree, get_tree_contents
@@ -403,9 +404,9 @@ def stash(*args):
 
         message = f"Stash on {get_head_ref()}: WIP"
         stash_commit_data = (
-            f"tree {index_tree_sha}\n"  # Staged changes
-            f"parent {head_commit}\n"  # The commit the stash was based on
-            f"parent {workdir_tree_sha}\n"  # Unstaged changes (as a parent)
+            f"tree {index_tree_sha}\n"
+            f"parent {head_commit}\n"
+            f"parent {workdir_tree_sha}\n"
             f"author PyGit Stash <stash@pygit.com> {datetime.now().isoformat()}\n"
             f"\n"
             f"{message}\n"
@@ -434,7 +435,7 @@ def stash(*args):
         lines = stash_content.decode().split('\n')
 
         index_tree_sha = lines[0].split(' ')[1]
-        workdir_tree_sha = lines[2].split(' ')[1]  # The second parent is the workdir tree
+        workdir_tree_sha = lines[2].split(' ')[1]
 
         index_tree = get_tree_contents(index_tree_sha)
         workdir_tree = get_tree_contents(workdir_tree_sha)
@@ -451,3 +452,61 @@ def stash(*args):
             write_stash(stashes[1:])
             print("Dropped refs/stash@{0}")
         return
+
+
+def clean(*args):
+    dry_run = '-n' in args or '--dry-run' in args
+    force = '-f' in args or '--force' in args
+    clean_dirs = '-d' in args
+
+    if not force and not dry_run:
+        print("fatal: clean.requireForce is true and neither -i, -n, nor -f given; "
+              "refusing to clean")
+        return False
+
+    index_tree = read_index()
+    pygit_dir = find_pygit_dir()
+    repo_root = os.path.dirname(pygit_dir)
+    gitignore_patterns = read_gitignore()
+
+    untracked_files = []
+    untracked_dirs = []
+
+    for root, dirs, files in os.walk(repo_root):
+        if '.pygit' in dirs:
+            dirs.remove('.pygit')
+
+        for name in files:
+            filepath = os.path.relpath(os.path.join(root, name), repo_root)
+            if filepath not in index_tree and not is_ignored(filepath, gitignore_patterns):
+                untracked_files.append(filepath)
+
+        if clean_dirs:
+            for name in dirs:
+                dirpath = os.path.relpath(os.path.join(root, name), repo_root)
+                if not any(f.startswith(dirpath) for f in index_tree) and not is_ignored(dirpath, gitignore_patterns):
+                    is_empty_of_tracked = True
+                    for _, _, inner_files in os.walk(dirpath):
+                        if any(os.path.relpath(os.path.join(dirpath, f), repo_root) in index_tree for f in inner_files):
+                            is_empty_of_tracked = False
+                            break
+                    if is_empty_of_tracked:
+                        untracked_dirs.append(dirpath)
+
+    if dry_run:
+        for f in untracked_files:
+            print(f"Would remove {f}")
+        for d in untracked_dirs:
+            print(f"Would remove {d}/")
+        return
+
+    for f in untracked_files:
+        print(f"Removing {f}")
+        os.remove(os.path.join(repo_root, f))
+
+    for d in sorted(untracked_dirs, reverse=True):
+        print(f"Removing {d}/")
+        try:
+            shutil.rmtree(os.path.join(repo_root, d))
+        except OSError as e:
+            print(f"Error removing directory {d}: {e}", file=sys.stderr)
