@@ -46,6 +46,7 @@ def update_head(ref, detached=False):
         else:
             f.write(f'ref: {ref}')
 
+
 def create_tag(tag_name, commit_sha1):
     pygit_dir = find_pygit_dir()
     tags_dir = os.path.join(pygit_dir, 'refs', 'tags')
@@ -76,3 +77,19 @@ def get_tag_commit(tag_name):
         return None
     with open(tag_path, 'r') as f:
         return f.read().strip()
+
+def read_stash():
+    pygit_dir = find_pygit_dir()
+    stash_path = os.path.join(pygit_dir, 'refs', 'stash')
+    if not os.path.exists(stash_path):
+        return []
+    with open(stash_path, 'r') as f:
+        return [line.strip() for line in f.readlines()]
+
+
+def write_stash(stashes):
+    pygit_dir = find_pygit_dir()
+    stash_path = os.path.join(pygit_dir, 'refs', 'stash')
+    with open(stash_path, 'w') as f:
+        for stash in stashes:
+            f.write(f"{stash}\n")
