@@ -17,10 +17,8 @@ from .resolver import resolve_ref, resolve_ref_to_commit
 from .config import read_config, write_config
 
 
-# --- Internal Helper Functions ---
 
 def _read_gitignore():
-    """Reads .gitignore from the repo root and returns a set of patterns."""
     pygit_dir = find_pygit_dir()
     if not pygit_dir: return set()
     repo_root = os.path.dirname(pygit_dir)
@@ -32,7 +30,6 @@ def _read_gitignore():
 
 
 def _is_ignored(filepath, gitignore_patterns):
-    """Checks if a filepath matches any of the .gitignore patterns."""
     filepath = filepath.replace(os.sep, '/')
     for pattern in gitignore_patterns:
         if pattern.endswith('/'):
@@ -44,7 +41,6 @@ def _is_ignored(filepath, gitignore_patterns):
 
 
 def _create_commit(message, tree_sha1, parents):
-    """Internal helper to create a commit object and get its hash."""
     config = read_config()
     author_name = config.get('user.name', 'PyGit User')
     author_email = config.get('user.email', 'user@pygit.com')
@@ -64,10 +60,6 @@ def _create_commit(message, tree_sha1, parents):
 
 
 def _resolve_ref_or_head(ref_name, to_commit=True):
-    """
-    Resolves a ref to a SHA1, with a special case for 'HEAD'.
-    If to_commit is True, dereferences tags to find the commit.
-    """
     if ref_name.upper() == 'HEAD':
         return get_head_commit()
 
@@ -77,7 +69,6 @@ def _resolve_ref_or_head(ref_name, to_commit=True):
         return resolve_ref(ref_name)
 
 
-# --- PyGit Commands ---
 
 def init():
     repo_init()
@@ -475,7 +466,6 @@ def stash(*args):
         stashes.insert(0, stash_hash)
         write_stash(stashes)
 
-        # Restore the working directory to match the index
         for filepath, sha1 in index_tree.items():
             full_path = os.path.join(repo_root, filepath)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -483,11 +473,9 @@ def stash(*args):
             with open(full_path, 'wb') as f:
                 f.write(content)
 
-        # Update the index to match the head commit
         head_tree = get_tree_contents(get_commit_tree(head_commit))
         write_index(head_tree)
 
-        # Restore the working directory to match the head commit
         checkout(head_commit)
 
         print(f"Saved working directory and index state as stash@{{{len(stashes) - 1}}}")
@@ -509,10 +497,8 @@ def stash(*args):
         index_tree = get_tree_contents(index_tree_sha)
         workdir_tree = get_tree_contents(workdir_tree_sha)
 
-        # Update the index to match the stashed index
         write_index(index_tree)
 
-        # Restore the working directory to match the stashed working directory
         pygit_dir = find_pygit_dir()
         repo_root = os.path.dirname(pygit_dir)
         for filepath, sha1 in workdir_tree.items():
@@ -603,12 +589,6 @@ def config(*args):
 
 
 def rebase(target_branch):
-    """
-    Rebase the current branch onto the target branch.
-    This rewrites the commit history by replaying commits from the current branch
-    on top of the target branch.
-    """
-    # Get the current branch name and HEAD commit
     current_ref = get_head_ref()
     if not current_ref.startswith('refs/heads/'):
         print("Cannot rebase: HEAD is detached.", file=sys.stderr)
@@ -616,18 +596,15 @@ def rebase(target_branch):
     current_branch = current_ref.split('/')[-1]
     current_commit = get_head_commit()
 
-    # Get the target branch commit
     target_commit = get_branch_commit(target_branch)
     if not target_commit:
         print(f"Error: Branch '{target_branch}' does not exist.", file=sys.stderr)
         return False
 
-    # Check if rebase is necessary
     if current_commit == target_commit:
         print("Already up to date.")
         return True
 
-    # Find the common ancestor
     base_commit = find_common_ancestor(current_commit, target_commit)
     if not base_commit:
         print("Error: No common ancestor found.", file=sys.stderr)
@@ -636,34 +613,27 @@ def rebase(target_branch):
     print(f"Rebasing {current_branch} onto {target_branch}")
     print(f"Common ancestor is {base_commit[:7]}")
 
-    # Get the list of commits to replay (from oldest to newest)
     commits_to_replay = []
     target_history = get_full_history_set(target_commit)
 
-    # Walk through the current branch's history until we reach the common ancestor
     for commit_sha, content in get_commit_history(current_commit):
         if commit_sha in target_history or commit_sha == base_commit:
             break
         commits_to_replay.append((commit_sha, content))
 
-    # Reverse the list to get oldest first
     commits_to_replay.reverse()
 
     if not commits_to_replay:
         print("No commits to replay. Already up to date.")
         return True
 
-    # Temporarily detach HEAD and point it to the target branch
     update_head(target_commit, detached=True)
 
-    # Get the target branch tree
     target_tree = get_tree_contents(get_commit_tree(target_commit))
 
-    # Checkout the target branch to update the working directory
     pygit_dir = find_pygit_dir()
     repo_root = os.path.dirname(pygit_dir)
 
-    # Update the working directory to match the target branch
     for filepath, sha1 in target_tree.items():
         full_path = os.path.join(repo_root, filepath)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -671,41 +641,32 @@ def rebase(target_branch):
         with open(full_path, 'wb') as f:
             f.write(content)
 
-    # Replay each commit
     new_base = target_commit
     for commit_sha, content in commits_to_replay:
-        # Extract commit message
         message_start = content.find(b'\n\n') + 2
         message = content[message_start:].decode().strip()
 
-        # Get the tree from the original commit
         original_tree = get_tree_contents(get_commit_tree(commit_sha))
 
-        # Create a new tree that combines the target tree and the original tree
         combined_tree = target_tree.copy()
         combined_tree.update(original_tree)
 
-        # Hash the combined tree
         combined_tree_sha = hash_object(json.dumps(combined_tree, sort_keys=True).encode(), 'tree')
 
-        # Create a new commit with the combined tree and new parent
+
         new_commit = _create_commit(message, combined_tree_sha, [new_base])
 
-        # Update the base for the next commit
         new_base = new_commit
 
-        # Update the target tree for the next commit
         target_tree = combined_tree
 
         print(f"Replayed commit: {commit_sha[:7]} -> {new_commit[:7]}")
 
-    # Update the branch reference to point to the new tip
     pygit_dir = find_pygit_dir()
     branch_path = os.path.join(pygit_dir, current_ref)
     with open(branch_path, 'w') as f:
         f.write(new_base)
 
-    # Checkout the branch to update the working directory
     checkout(current_branch)
 
     print(f"Successfully rebased {current_branch} onto {target_branch}")
@@ -713,7 +674,6 @@ def rebase(target_branch):
 
 
 def show(ref_name='HEAD'):
-    # First try to resolve as a tag
     from .refs import get_tag_ref
     tag_sha1 = get_tag_ref(ref_name)
 
@@ -726,7 +686,6 @@ def show(ref_name='HEAD'):
             pretty_print_object(commit_sha1)
             return True
 
-    # If not a tag, resolve normally
     sha1 = _resolve_ref_or_head(ref_name, to_commit=True)
     if not sha1:
         print(f"fatal: ambiguous argument '{ref_name}': unknown revision or path not in the working tree.",

@@ -6,7 +6,6 @@ from pygit.repository import find_pygit_dir
 
 
 def main():
-    """Main function to parse command-line arguments and delegate to commands."""
 
     if find_pygit_dir() is None and len(sys.argv) > 1 and sys.argv[1] != 'init':
         print("fatal: not a pygit repository (or any of the parent directories): .pygit", file=sys.stderr)

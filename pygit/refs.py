@@ -103,7 +103,6 @@ def read_stash():
 
 
 def write_stash(stashes):
-    """Writes a list of stash commit hashes to the stash file."""
     pygit_dir = find_pygit_dir()
     stash_path = os.path.join(pygit_dir, 'refs', 'stash')
     with open(stash_path, 'w') as f:
