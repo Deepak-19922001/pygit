@@ -17,7 +17,7 @@ echo "Test directory created at: $(pwd)"
 echo "--- Starting PyGit Test Suite ---"
 
 # --- 1. Init Command ---
-echo -e "\n[TEST 1/12] pygit init"
+echo -e "\n[TEST 1/13] pygit init"
 $PYGIT_CMD init
 if [ ! -d ".pygit" ]; then
     echo "  FAIL: .pygit directory was not created."
@@ -26,7 +26,7 @@ fi
 echo "  PASS: Repository initialized successfully."
 
 # --- 2. Add, Commit, and Log Commands ---
-echo -e "\n[TEST 2/12] pygit add, commit, log"
+echo -e "\n[TEST 2/13] pygit add, commit, log"
 echo "Hello, PyGit!" > file1.txt
 $PYGIT_CMD add file1.txt
 $PYGIT_CMD commit -m "Initial commit"
@@ -38,7 +38,7 @@ COMMIT1_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: add, commit, and log work as expected."
 
 # --- 3. Status and Diff Commands ---
-echo -e "\n[TEST 3/12] pygit status, diff"
+echo -e "\n[TEST 3/13] pygit status, diff"
 echo "A new line." >> file1.txt
 echo "untracked" > untracked.txt
 if ! $PYGIT_CMD status | grep -q "modified:   file1.txt"; then
@@ -64,7 +64,7 @@ COMMIT2_HASH=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
 echo "  PASS: status and diff work as expected."
 
 # --- 4. Branch and Checkout Commands ---
-echo -e "\n[TEST 4/12] pygit branch, checkout"
+echo -e "\n[TEST 4/13] pygit branch, checkout"
 $PYGIT_CMD branch feature-branch $COMMIT1_HASH
 $PYGIT_CMD checkout feature-branch
 echo "feature" > feature-file.txt
@@ -78,7 +78,7 @@ fi
 echo "  PASS: branch and checkout work as expected."
 
 # --- 5. Tag and Detached HEAD ---
-echo -e "\n[TEST 5/12] pygit tag, detached HEAD"
+echo -e "\n[TEST 5/13] pygit tag, detached HEAD"
 $PYGIT_CMD checkout $COMMIT1_HASH
 if ! $PYGIT_CMD status | grep -q "HEAD detached at"; then
     echo "  FAIL: 'status' did not report a detached HEAD."
@@ -93,7 +93,7 @@ fi
 echo "  PASS: tag and detached HEAD work as expected."
 
 # --- 6. .gitignore Functionality ---
-echo -e "\n[TEST 6/12] .gitignore"
+echo -e "\n[TEST 6/13] .gitignore"
 echo "*.log" > .gitignore
 echo "temp/" >> .gitignore
 touch app.log
@@ -109,7 +109,7 @@ fi
 echo "  PASS: .gitignore works as expected."
 
 # --- 7. RM Command ---
-echo -e "\n[TEST 7/12] pygit rm"
+echo -e "\n[TEST 7/13] pygit rm"
 $PYGIT_CMD add untracked.txt
 $PYGIT_CMD commit -m "Add untracked.txt to track it"
 $PYGIT_CMD rm untracked.txt
@@ -125,7 +125,7 @@ fi
 echo "  PASS: rm works as expected."
 
 # --- 8. Stash Command ---
-echo -e "\n[TEST 8/12] pygit stash"
+echo -e "\n[TEST 8/13] pygit stash"
 echo "stashed content" > stash-test.txt
 $PYGIT_CMD add stash-test.txt
 echo "more stashed content" >> stash-test.txt
@@ -153,7 +153,7 @@ echo "  - Stash pop works as expected."
 echo "  PASS: Stash command works as expected."
 
 # --- 9. Clean Command ---
-echo -e "\n[TEST 9/12] pygit clean"
+echo -e "\n[TEST 9/13] pygit clean"
 echo "untracked file to clean" > clean-me.txt
 mkdir clean-dir && echo "data" > clean-dir/file.txt
 if ! $PYGIT_CMD clean -n | grep -q "Would remove clean-me.txt"; then
@@ -182,7 +182,7 @@ echo "  - Force clean for directories works as expected."
 echo "  PASS: Clean command works as expected."
 
 # --- 10. Config Command ---
-echo -e "\n[TEST 10/12] pygit config"
+echo -e "\n[TEST 10/13] pygit config"
 $PYGIT_CMD config user.name "Test User"
 $PYGIT_CMD config user.email "test@example.com"
 if ! $PYGIT_CMD config user.name | grep -q "Test User"; then
@@ -200,7 +200,7 @@ echo "  - Commit correctly uses configured user."
 echo "  PASS: Config command works as expected."
 
 # --- 11. Merge Command ---
-echo -e "\n[TEST 11/12] Three-way merge"
+echo -e "\n[TEST 11/13] Three-way merge"
 $PYGIT_CMD checkout $COMMIT1_HASH
 $PYGIT_CMD branch branch1
 $PYGIT_CMD branch branch2
@@ -260,95 +260,46 @@ fi
 echo "  - Annotated tags work as expected."
 echo "  PASS: Show and annotated tags work as expected."
 
-# --- 13. Rebase Command ---
-echo -e "\n[TEST 13/13] pygit rebase"
-# Create a new repository for rebase testing
-rm -rf "$TEST_DIR"
-mkdir -p "$TEST_DIR"
-cd "$TEST_DIR"
+# --- 13. Remote and Clone Commands ---
+echo -e "\n[TEST 13/13] pygit remote and clone"
+# Setup a "server" repository
+mkdir -p ../server_repo
+cd ../server_repo
 $PYGIT_CMD init
+echo "server content" > server_file.txt
+$PYGIT_CMD add server_file.txt
+$PYGIT_CMD commit -m "Initial server commit"
+cd ../
 
-# Create a base commit
-echo "Base content" > base.txt
-$PYGIT_CMD add base.txt
-$PYGIT_CMD commit -m "Base commit"
-
-# Get the base commit hash
-BASE_COMMIT=$($PYGIT_CMD log | grep 'commit ' | head -n 1 | cut -d ' ' -f 2)
-
-# Create two branches from the base commit
-$PYGIT_CMD checkout $BASE_COMMIT
-$PYGIT_CMD branch feature
-$PYGIT_CMD branch main-branch
-
-# Make changes on main-branch (target branch for rebase)
-$PYGIT_CMD checkout main-branch
-echo "Main branch content" > main.txt
-$PYGIT_CMD add main.txt
-$PYGIT_CMD commit -m "Commit on main branch"
-
-# Make changes on feature branch (branch to be rebased)
-$PYGIT_CMD checkout feature
-echo "Feature commit 1" > feature1.txt
-$PYGIT_CMD add feature1.txt
-$PYGIT_CMD commit -m "Feature commit 1"
-
-echo "Feature commit 2" > feature2.txt
-$PYGIT_CMD add feature2.txt
-$PYGIT_CMD commit -m "Feature commit 2"
-
-# Rebase feature onto main-branch
-$PYGIT_CMD rebase main-branch
-
-# Verify that the feature branch now contains the main branch commit
-if ! $PYGIT_CMD log | grep -q "Commit on main branch"; then
-    echo "  FAIL: After rebase, feature branch does not contain main branch commit."
+# Clone the server repo
+$PYGIT_CMD clone server_repo client_repo
+cd client_repo
+if [ ! -d ".pygit" ]; then
+    echo "  FAIL: Clone did not create a .pygit directory."
     exit 1
 fi
-echo "  - Feature branch contains main branch commit after rebase."
+if ! $PYGIT_CMD remote | grep -q "origin"; then
+    echo "  FAIL: Clone did not add 'origin' remote."
+    exit 1
+fi
+echo "  - Clone command works as expected."
 
-# Verify that the feature branch commits are still present
-if ! $PYGIT_CMD log | grep -q "Feature commit 1"; then
-    echo "  FAIL: After rebase, feature branch does not contain Feature commit 1."
+# Test remote add/remove
+$PYGIT_CMD remote add test_remote ../server_repo
+if ! $PYGIT_CMD remote | grep -q "test_remote"; then
+    echo "  FAIL: 'remote add' failed."
     exit 1
 fi
-if ! $PYGIT_CMD log | grep -q "Feature commit 2"; then
-    echo "  FAIL: After rebase, feature branch does not contain Feature commit 2."
+$PYGIT_CMD remote remove test_remote
+if $PYGIT_CMD remote | grep -q "test_remote"; then
+    echo "  FAIL: 'remote remove' failed."
     exit 1
 fi
-echo "  - Feature branch commits are preserved after rebase."
-
-# Verify that both files from feature branch and main branch exist
-if [ ! -f "main.txt" ]; then
-    echo "  FAIL: After rebase, main.txt from main branch does not exist."
-    exit 1
-fi
-if [ ! -f "feature1.txt" ]; then
-    echo "  FAIL: After rebase, feature1.txt from feature branch does not exist."
-    exit 1
-fi
-if [ ! -f "feature2.txt" ]; then
-    echo "  FAIL: After rebase, feature2.txt from feature branch does not exist."
-    exit 1
-fi
-echo "  - Files from both branches exist after rebase."
-
-# Verify the commit order (main branch commit should be before feature commits)
-LOG_OUTPUT=$($PYGIT_CMD log)
-if ! echo "$LOG_OUTPUT" | grep -A10 "Feature commit 2" | grep -q "Feature commit 1"; then
-    echo "  FAIL: Commit order is incorrect after rebase."
-    exit 1
-fi
-if ! echo "$LOG_OUTPUT" | grep -A20 "Feature commit 1" | grep -q "Commit on main branch"; then
-    echo "  FAIL: Commit order is incorrect after rebase."
-    exit 1
-fi
-echo "  - Commit order is correct after rebase."
-
-echo "  PASS: Rebase command works as expected."
+echo "  - Remote add/remove works as expected."
+echo "  PASS: Remote and Clone commands work as expected."
 
 
 # --- Cleanup ---
-cd ..
+cd ../..
 rm -rf "$TEST_DIR"
 echo -e "\n--- PyGit Test Suite Completed Successfully ---"

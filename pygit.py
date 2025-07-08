@@ -7,7 +7,8 @@ from pygit.repository import find_pygit_dir
 
 def main():
 
-    if find_pygit_dir() is None and len(sys.argv) > 1 and sys.argv[1] != 'init':
+    # Allow 'init' and 'clone' to run outside a repository
+    if find_pygit_dir() is None and len(sys.argv) > 1 and sys.argv[1] not in ['init', 'clone']:
         print("fatal: not a pygit repository (or any of the parent directories): .pygit", file=sys.stderr)
         sys.exit(1)
 

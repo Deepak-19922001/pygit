@@ -15,7 +15,7 @@ from .diff import compare_files, compare_trees
 from .utils import get_commit_history, find_common_ancestor, get_full_history_set
 from .resolver import resolve_ref, resolve_ref_to_commit
 from .config import read_config, write_config
-
+from .remote import add_remote, remove_remote, list_remotes
 
 
 def _read_gitignore():
@@ -67,7 +67,6 @@ def _resolve_ref_or_head(ref_name, to_commit=True):
         return resolve_ref_to_commit(ref_name)
     else:
         return resolve_ref(ref_name)
-
 
 
 def init():
@@ -466,17 +465,8 @@ def stash(*args):
         stashes.insert(0, stash_hash)
         write_stash(stashes)
 
-        for filepath, sha1 in index_tree.items():
-            full_path = os.path.join(repo_root, filepath)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            _, content = read_object(sha1)
-            with open(full_path, 'wb') as f:
-                f.write(content)
-
-        head_tree = get_tree_contents(get_commit_tree(head_commit))
-        write_index(head_tree)
-
         checkout(head_commit)
+        write_index(get_tree_contents(get_commit_tree(head_commit)))
 
         print(f"Saved working directory and index state as stash@{{{len(stashes) - 1}}}")
         return
@@ -498,15 +488,7 @@ def stash(*args):
         workdir_tree = get_tree_contents(workdir_tree_sha)
 
         write_index(index_tree)
-
-        pygit_dir = find_pygit_dir()
-        repo_root = os.path.dirname(pygit_dir)
-        for filepath, sha1 in workdir_tree.items():
-            full_path = os.path.join(repo_root, filepath)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            _, content = read_object(sha1)
-            with open(full_path, 'wb') as f:
-                f.write(content)
+        checkout(get_head_commit())
 
         print(f"Applied stash@{{0}}")
 
@@ -653,7 +635,6 @@ def rebase(target_branch):
 
         combined_tree_sha = hash_object(json.dumps(combined_tree, sort_keys=True).encode(), 'tree')
 
-
         new_commit = _create_commit(message, combined_tree_sha, [new_base])
 
         new_base = new_commit
@@ -699,3 +680,41 @@ def show(ref_name='HEAD'):
         commit_sha1 = content.decode().split('\n')[0].split(' ')[1]
         print("\n")
         pretty_print_object(commit_sha1)
+
+
+def remote(*args):
+    if len(args) == 0:
+        remotes = list_remotes()
+        for name in remotes:
+            print(name)
+        return
+
+    subcommand = args[0]
+    if subcommand == 'add' and len(args) == 3:
+        add_remote(args[1], args[2])
+    elif subcommand == 'remove' and len(args) == 2:
+        remove_remote(args[1])
+    else:
+        print("Usage: pygit remote [add <name> <url> | remove <name>]", file=sys.stderr)
+        return False
+
+
+def clone(url, directory=None):
+    if not directory:
+        directory = os.path.basename(url)
+        if directory.endswith('.pygit'):
+            directory = directory[:-6]
+
+    if os.path.exists(directory):
+        print(f"fatal: destination path '{directory}' already exists and is not an empty directory.")
+        return False
+
+    print(f"Cloning into '{directory}'...")
+    os.makedirs(directory)
+    os.chdir(directory)
+
+    init()
+    add_remote('origin', os.path.abspath(os.path.join('..', url)))
+
+    # This is a placeholder for fetch, which we will implement next
+    print("Cloning complete (fetch not yet implemented).")
